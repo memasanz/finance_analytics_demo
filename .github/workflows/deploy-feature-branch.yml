@@ -345,7 +345,7 @@ jobs:
             CONTENT_FILE=$(mktemp)
             jq -r '.definition.parts[] | select(.path=="notebook-content.py") | .payload' "$DEF_FILE" > "$CONTENT_B64_FILE" 2>/dev/null
 
-            if [ ! -s "$CONTENT_B64_FILE" ] || [ "$(cat "$CONTENT_B64_FILE")" = "null" ]; then
+            if [ ! -s "$CONTENT_B64_FILE" ] || [ "$(head -c 4 "$CONTENT_B64_FILE")" = "null" ]; then
               echo "WARNING: Could not get notebook content for $NB_NAME. Skipping."
               rm -f "$DEF_FILE" "$CONTENT_B64_FILE" "$CONTENT_FILE" 2>/dev/null
               continue
