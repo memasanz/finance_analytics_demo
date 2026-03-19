@@ -126,6 +126,8 @@ jobs:
 
           if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
             echo "Workspace connected to Git successfully"
+          elif [ "$HTTP_CODE" = "409" ]; then
+            echo "Workspace already connected to Git (409). Continuing..."
           else
             echo "Failed to connect to Git (HTTP $HTTP_CODE): $BODY"
             exit 1
@@ -143,15 +145,20 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{}")
 
+          echo "Init response: $INIT_RESPONSE"
           REQUIRED_ACTION=$(echo "$INIT_RESPONSE" | jq -r '.requiredAction')
           REMOTE_COMMIT=$(echo "$INIT_RESPONSE" | jq -r '.remoteCommitHash')
           WORKSPACE_HEAD=$(echo "$INIT_RESPONSE" | jq -r '.workspaceHead')
 
           echo "Required action: $REQUIRED_ACTION"
+          echo "Remote commit: $REMOTE_COMMIT"
+          echo "Workspace head: $WORKSPACE_HEAD"
 
           if [ "$REQUIRED_ACTION" = "UpdateFromGit" ]; then
             echo "Updating workspace from Git..."
-            UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            # Use -D to capture response headers for the operation ID
+            HEADER_FILE=$(mktemp)
+            UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -D "$HEADER_FILE" -X POST \
               "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/git/updateFromGit" \
               -H "Authorization: Bearer ${FABRIC_TOKEN}" \
               -H "Content-Type: application/json" \
@@ -169,35 +176,51 @@ jobs:
 
             HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -1)
             BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
-            OPERATION_ID=$(echo "$BODY" | jq -r '.operationId // empty')
+            echo "Update response (HTTP $HTTP_CODE): $BODY"
+            echo "Response headers:"
+            cat "$HEADER_FILE"
 
-            # Extract operation ID from headers if returned as 202
-            if [ "$HTTP_CODE" = "202" ]; then
-              echo "Update started as long-running operation. Polling..."
-              # Parse operation ID from Location header or response
-              OPERATION_ID=$(echo "$BODY" | jq -r '.operationId // empty')
+            # Try to get operation ID from response body first, then from Location header
+            OPERATION_ID=$(echo "$BODY" | jq -r '.operationId // empty' 2>/dev/null)
+            if [ -z "$OPERATION_ID" ]; then
+              # Extract from Location header: .../operations/{id}
+              LOCATION=$(grep -i "^location:" "$HEADER_FILE" | sed 's/Location: *//i' | tr -d '\r')
+              echo "Location header: $LOCATION"
+              OPERATION_ID=$(echo "$LOCATION" | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | tail -1)
             fi
+            if [ -z "$OPERATION_ID" ]; then
+              # Try x-ms-operation-id header
+              OPERATION_ID=$(grep -i "^x-ms-operation-id:" "$HEADER_FILE" | sed 's/x-ms-operation-id: *//i' | tr -d '\r')
+            fi
+            rm -f "$HEADER_FILE"
 
-            # Poll for completion
-            for i in $(seq 1 30); do
-              sleep 20
-              STATE=$(curl -s \
-                "${FABRIC_API_BASE}/operations/${OPERATION_ID}" \
-                -H "Authorization: Bearer ${FABRIC_TOKEN}" \
-                -H "Content-Type: application/json")
+            echo "Operation ID: $OPERATION_ID"
 
-              STATUS=$(echo "$STATE" | jq -r '.status')
-              PERCENT=$(echo "$STATE" | jq -r '.percentComplete')
-              echo "Operation status: $STATUS ($PERCENT%)"
+            if [ -z "$OPERATION_ID" ]; then
+              echo "WARNING: No operation ID found. Waiting 120s for sync to complete..."
+              sleep 120
+            else
+              echo "Polling for operation completion..."
+              for i in $(seq 1 30); do
+                sleep 20
+                STATE=$(curl -s \
+                  "${FABRIC_API_BASE}/operations/${OPERATION_ID}" \
+                  -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+                  -H "Content-Type: application/json")
 
-              if [ "$STATUS" = "Succeeded" ]; then
-                echo "Workspace updated from Git successfully"
-                break
-              elif [ "$STATUS" = "Failed" ]; then
-                echo "Update from Git failed: $STATE"
-                exit 1
-              fi
-            done
+                STATUS=$(echo "$STATE" | jq -r '.status')
+                PERCENT=$(echo "$STATE" | jq -r '.percentComplete')
+                echo "Operation status: $STATUS ($PERCENT%)"
+
+                if [ "$STATUS" = "Succeeded" ]; then
+                  echo "Workspace updated from Git successfully"
+                  break
+                elif [ "$STATUS" = "Failed" ]; then
+                  echo "Update from Git failed: $STATE"
+                  exit 1
+                fi
+              done
+            fi
           elif [ "$REQUIRED_ACTION" = "None" ]; then
             echo "No update needed - workspace is already in sync"
           fi
@@ -230,6 +253,11 @@ jobs:
 
           echo "Notebook IDs: NB1=$NB1, NB2=$NB2, NB3=$NB3"
 
+          if [ -z "$NB1" ] || [ -z "$NB2" ] || [ -z "$NB3" ]; then
+            echo "ERROR: One or more notebooks not found in workspace. Available items above."
+            exit 1
+          fi
+
       - name: Run Notebook - 01_Generate_Invoices
         env:
           FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
@@ -240,7 +268,8 @@ jobs:
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
             "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?jobType=RunNotebook" \
             -H "Authorization: Bearer ${FABRIC_TOKEN}" \
-            -H "Content-Type: application/json")
+            -H "Content-Type: application/json" \
+            -d "")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           BODY=$(echo "$RESPONSE" | sed '$d')
@@ -277,7 +306,8 @@ jobs:
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
             "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?jobType=RunNotebook" \
             -H "Authorization: Bearer ${FABRIC_TOKEN}" \
-            -H "Content-Type: application/json")
+            -H "Content-Type: application/json" \
+            -d "")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           echo "Started (HTTP $HTTP_CODE)"
@@ -311,7 +341,8 @@ jobs:
           RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
             "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?jobType=RunNotebook" \
             -H "Authorization: Bearer ${FABRIC_TOKEN}" \
-            -H "Content-Type: application/json")
+            -H "Content-Type: application/json" \
+            -d "")
 
           HTTP_CODE=$(echo "$RESPONSE" | tail -1)
           echo "Started (HTTP $HTTP_CODE)"
