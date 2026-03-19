@@ -292,9 +292,9 @@ jobs:
           for idx in 0 1 2; do
             NB_ID="${NOTEBOOKS[$idx]}"
             NB_NAME="${NB_NAMES[$idx]}"
-            echo "Updating lakehouse binding for $NB_NAME ($NB_ID)..."
+            echo "=== Updating lakehouse binding for $NB_NAME ($NB_ID) ==="
 
-            # Get the notebook definition (async operation)
+            # Step 1: Start getDefinition (returns 202 for async)
             HEADER_FILE=$(mktemp)
             DEF_RESP=$(curl -s -w "\n%{http_code}" -D "$HEADER_FILE" -X POST \
               "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/getDefinition" \
@@ -303,76 +303,64 @@ jobs:
               -d "")
 
             HTTP_CODE=$(echo "$DEF_RESP" | tail -1)
-            echo "getDefinition response: HTTP $HTTP_CODE"
+            BODY=$(echo "$DEF_RESP" | sed '$d')
+            echo "getDefinition: HTTP $HTTP_CODE"
 
-            if [ "$HTTP_CODE" = "202" ]; then
-              # Long-running operation - get operation ID from headers
-              LOCATION=$(grep -i "^location:" "$HEADER_FILE" | sed 's/[Ll]ocation: *//g' | tr -d '\r')
+            DEF_BODY=""
+            if [ "$HTTP_CODE" = "200" ]; then
+              DEF_BODY="$BODY"
+            elif [ "$HTTP_CODE" = "202" ]; then
               OP_ID=$(grep -i "^x-ms-operation-id:" "$HEADER_FILE" | sed 's/[Xx]-[Mm][Ss]-[Oo]peration-[Ii][Dd]: *//g' | tr -d '\r')
-              RETRY=$(grep -i "^retry-after:" "$HEADER_FILE" | sed 's/[Rr]etry-[Aa]fter: *//g' | tr -d '\r')
+              echo "Async operation: $OP_ID"
               rm -f "$HEADER_FILE"
-              echo "Operation ID: $OP_ID, Retry-After: $RETRY"
 
-              # Poll for completion
-              sleep "${RETRY:-10}"
-              for i in $(seq 1 15); do
-                RESULT=$(curl -s -w "\n%{http_code}" \
-                  "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/getDefinition" \
-                  -H "Authorization: Bearer ${FABRIC_TOKEN}" \
-                  -H "Content-Type: application/json" \
-                  -X POST -d "")
-                R_CODE=$(echo "$RESULT" | tail -1)
-                R_BODY=$(echo "$RESULT" | sed '$d')
-                if [ "$R_CODE" = "200" ]; then
-                  DEF_BODY="$R_BODY"
-                  echo "Got definition successfully"
+              # Step 2: Poll operation status via GET /operations/{opId}
+              for i in $(seq 1 20); do
+                sleep 10
+                OP_STATE=$(curl -s \
+                  "${FABRIC_API_BASE}/operations/${OP_ID}" \
+                  -H "Authorization: Bearer ${FABRIC_TOKEN}")
+                OP_STATUS=$(echo "$OP_STATE" | jq -r '.status')
+                echo "  Operation status: $OP_STATUS (attempt $i)"
+                if [ "$OP_STATUS" = "Succeeded" ]; then
+                  break
+                elif [ "$OP_STATUS" = "Failed" ]; then
+                  echo "  Operation failed: $OP_STATE"
                   break
                 fi
-                # Also try the operation result endpoint
-                if [ -n "$OP_ID" ]; then
-                  OP_RESULT=$(curl -s \
-                    "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/getDefinition/result/${OP_ID}" \
-                    -H "Authorization: Bearer ${FABRIC_TOKEN}" \
-                    -H "Content-Type: application/json")
-                  HAS_PARTS=$(echo "$OP_RESULT" | jq -r '.definition.parts // empty' 2>/dev/null)
-                  if [ -n "$HAS_PARTS" ]; then
-                    DEF_BODY="$OP_RESULT"
-                    echo "Got definition from operation result"
-                    break
-                  fi
-                fi
-                echo "Waiting for definition... (attempt $i)"
-                sleep 10
               done
+
+              # Step 3: Get the result via the result endpoint
+              if [ "$OP_STATUS" = "Succeeded" ]; then
+                DEF_BODY=$(curl -s \
+                  "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/getDefinition/result/${OP_ID}" \
+                  -H "Authorization: Bearer ${FABRIC_TOKEN}")
+                echo "Got definition from result endpoint"
+              fi
             else
               rm -f "$HEADER_FILE"
-              DEF_BODY=$(echo "$DEF_RESP" | sed '$d')
+              echo "Unexpected status: HTTP $HTTP_CODE - $BODY"
             fi
 
-            # Extract the notebook-content.py part (base64 encoded)
-            NB_CONTENT_B64=$(echo "$DEF_BODY" | jq -r '.definition.parts[] | select(.path=="notebook-content.py") | .payload')
+            # Step 4: Extract and modify notebook content
+            NB_CONTENT_B64=$(echo "$DEF_BODY" | jq -r '.definition.parts[] | select(.path=="notebook-content.py") | .payload' 2>/dev/null)
 
             if [ -z "$NB_CONTENT_B64" ] || [ "$NB_CONTENT_B64" = "null" ]; then
-              echo "WARNING: Could not get notebook content for $NB_NAME. Skipping lakehouse update."
-              echo "Definition body: $DEF_BODY"
+              echo "WARNING: Could not get notebook content for $NB_NAME. Skipping."
               continue
             fi
 
             # Decode, replace lakehouse IDs, re-encode
             NB_CONTENT=$(echo "$NB_CONTENT_B64" | base64 -d)
-
-            # Replace the old lakehouse ID and workspace ID with the new ones
             UPDATED_CONTENT=$(echo "$NB_CONTENT" | \
               sed "s/\"default_lakehouse\": \"[^\"]*\"/\"default_lakehouse\": \"${LAKEHOUSE_ID}\"/g" | \
               sed "s/\"default_lakehouse_workspace_id\": \"[^\"]*\"/\"default_lakehouse_workspace_id\": \"${WORKSPACE_ID}\"/g" | \
               sed "s/\"id\": \"[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}\"/\"id\": \"${LAKEHOUSE_ID}\"/g")
-
             UPDATED_B64=$(echo "$UPDATED_CONTENT" | base64 -w 0)
 
-            # Get the platform part
             PLATFORM_B64=$(echo "$DEF_BODY" | jq -r '.definition.parts[] | select(.path==".platform") | .payload')
 
-            # Update the notebook definition
+            # Step 5: Update the notebook definition
             UPDATE_BODY=$(jq -n \
               --arg nb_payload "$UPDATED_B64" \
               --arg plat_payload "$PLATFORM_B64" \
@@ -385,7 +373,8 @@ jobs:
                 }
               }')
 
-            UPDATE_RESP=$(curl -s -w "\n%{http_code}" -X POST \
+            UPD_HEADER=$(mktemp)
+            UPDATE_RESP=$(curl -s -w "\n%{http_code}" -D "$UPD_HEADER" -X POST \
               "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/updateDefinition" \
               -H "Authorization: Bearer ${FABRIC_TOKEN}" \
               -H "Content-Type: application/json" \
@@ -393,15 +382,29 @@ jobs:
 
             U_CODE=$(echo "$UPDATE_RESP" | tail -1)
             U_BODY=$(echo "$UPDATE_RESP" | sed '$d')
-            echo "updateDefinition response: HTTP $U_CODE"
+            echo "updateDefinition: HTTP $U_CODE"
 
-            if [ "$U_CODE" -ge 200 ] && [ "$U_CODE" -lt 300 ] || [ "$U_CODE" = "202" ]; then
-              echo "Notebook $NB_NAME updated with new lakehouse ID"
-              sleep 5
+            if [ "$U_CODE" = "200" ]; then
+              echo "Notebook $NB_NAME updated successfully"
+            elif [ "$U_CODE" = "202" ]; then
+              # Wait for async update to complete
+              UPD_OP_ID=$(grep -i "^x-ms-operation-id:" "$UPD_HEADER" | sed 's/[Xx]-[Mm][Ss]-[Oo]peration-[Ii][Dd]: *//g' | tr -d '\r')
+              echo "Update async operation: $UPD_OP_ID"
+              for j in $(seq 1 15); do
+                sleep 10
+                UPD_STATE=$(curl -s "${FABRIC_API_BASE}/operations/${UPD_OP_ID}" -H "Authorization: Bearer ${FABRIC_TOKEN}")
+                UPD_STATUS=$(echo "$UPD_STATE" | jq -r '.status')
+                echo "  Update status: $UPD_STATUS"
+                if [ "$UPD_STATUS" = "Succeeded" ] || [ "$UPD_STATUS" = "Failed" ]; then break; fi
+              done
+              echo "Notebook $NB_NAME update completed: $UPD_STATUS"
             else
               echo "WARNING: Failed to update $NB_NAME (HTTP $U_CODE): $U_BODY"
             fi
+            rm -f "$UPD_HEADER" 2>/dev/null
           done
+
+          echo "Lakehouse binding update complete"
 
           echo "Lakehouse binding update complete"
 
