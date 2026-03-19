@@ -1,0 +1,326 @@
+name: Deploy Feature Branch Workspace
+
+on:
+  create:
+    branches:
+      - 'feature_*'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  FABRIC_API_BASE: https://api.fabric.microsoft.com/v1
+  CAPACITY_ID: ${{ secrets.FABRIC_CAPACITY_ID }}
+  GIT_CONNECTION_ID: ${{ secrets.GIT_CONNECTION_ID }}
+
+jobs:
+  deploy-and-populate:
+    if: github.event.ref_type == 'branch' && startsWith(github.event.ref, 'feature_')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Fabric Access Token
+        id: get-token
+        run: |
+          TOKEN=$(az account get-access-token --resource "https://api.fabric.microsoft.com" --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "FABRIC_TOKEN=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Create Feature Workspace
+        id: create-workspace
+        env:
+          FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
+        run: |
+          BRANCH_NAME="${{ github.event.ref }}"
+          WORKSPACE_NAME="${BRANCH_NAME}"
+
+          echo "Creating workspace: $WORKSPACE_NAME"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${FABRIC_API_BASE}/workspaces" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"displayName\": \"${WORKSPACE_NAME}\",
+              \"capacityId\": \"${CAPACITY_ID}\"
+            }")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            WORKSPACE_ID=$(echo "$BODY" | jq -r '.id')
+            echo "Workspace created: $WORKSPACE_ID"
+            echo "WORKSPACE_ID=$WORKSPACE_ID" >> "$GITHUB_OUTPUT"
+            echo "WORKSPACE_NAME=$WORKSPACE_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "Failed to create workspace (HTTP $HTTP_CODE): $BODY"
+            exit 1
+          fi
+
+      - name: Connect Workspace to Git Branch
+        env:
+          FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
+          WORKSPACE_ID: ${{ steps.create-workspace.outputs.WORKSPACE_ID }}
+        run: |
+          BRANCH_NAME="${{ github.event.ref }}"
+          OWNER_NAME="${{ github.repository_owner }}"
+          REPO_NAME="${{ github.event.repository.name }}"
+
+          echo "Connecting workspace to branch: $BRANCH_NAME"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/git/connect" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"gitProviderDetails\": {
+                \"ownerName\": \"${OWNER_NAME}\",
+                \"gitProviderType\": \"GitHub\",
+                \"repositoryName\": \"${REPO_NAME}\",
+                \"branchName\": \"${BRANCH_NAME}\",
+                \"directoryName\": \"/\"
+              },
+              \"myGitCredentials\": {
+                \"source\": \"ConfiguredConnection\",
+                \"connectionId\": \"${GIT_CONNECTION_ID}\"
+              }
+            }")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "Workspace connected to Git successfully"
+          else
+            echo "Failed to connect to Git (HTTP $HTTP_CODE): $BODY"
+            exit 1
+          fi
+
+      - name: Initialize Connection and Update from Git
+        env:
+          FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
+          WORKSPACE_ID: ${{ steps.create-workspace.outputs.WORKSPACE_ID }}
+        run: |
+          echo "Initializing Git connection..."
+          INIT_RESPONSE=$(curl -s -X POST \
+            "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/git/initializeConnection" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{}")
+
+          REQUIRED_ACTION=$(echo "$INIT_RESPONSE" | jq -r '.requiredAction')
+          REMOTE_COMMIT=$(echo "$INIT_RESPONSE" | jq -r '.remoteCommitHash')
+          WORKSPACE_HEAD=$(echo "$INIT_RESPONSE" | jq -r '.workspaceHead')
+
+          echo "Required action: $REQUIRED_ACTION"
+
+          if [ "$REQUIRED_ACTION" = "UpdateFromGit" ]; then
+            echo "Updating workspace from Git..."
+            UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+              "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/git/updateFromGit" \
+              -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"remoteCommitHash\": \"${REMOTE_COMMIT}\",
+                \"workspaceHead\": \"${WORKSPACE_HEAD}\",
+                \"conflictResolution\": {
+                  \"conflictResolutionType\": \"Workspace\",
+                  \"conflictResolutionPolicy\": \"PreferRemote\"
+                },
+                \"options\": {
+                  \"allowOverrideItems\": true
+                }
+              }")
+
+            HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -1)
+            BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
+            OPERATION_ID=$(echo "$BODY" | jq -r '.operationId // empty')
+
+            # Extract operation ID from headers if returned as 202
+            if [ "$HTTP_CODE" = "202" ]; then
+              echo "Update started as long-running operation. Polling..."
+              # Parse operation ID from Location header or response
+              OPERATION_ID=$(echo "$BODY" | jq -r '.operationId // empty')
+            fi
+
+            # Poll for completion
+            for i in $(seq 1 30); do
+              sleep 20
+              STATE=$(curl -s \
+                "${FABRIC_API_BASE}/operations/${OPERATION_ID}" \
+                -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+                -H "Content-Type: application/json")
+
+              STATUS=$(echo "$STATE" | jq -r '.status')
+              PERCENT=$(echo "$STATE" | jq -r '.percentComplete')
+              echo "Operation status: $STATUS ($PERCENT%)"
+
+              if [ "$STATUS" = "Succeeded" ]; then
+                echo "Workspace updated from Git successfully"
+                break
+              elif [ "$STATUS" = "Failed" ]; then
+                echo "Update from Git failed: $STATE"
+                exit 1
+              fi
+            done
+          elif [ "$REQUIRED_ACTION" = "None" ]; then
+            echo "No update needed - workspace is already in sync"
+          fi
+
+      - name: Wait for Items to Provision
+        run: sleep 60
+
+      - name: Get Workspace Items
+        id: get-items
+        env:
+          FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
+          WORKSPACE_ID: ${{ steps.create-workspace.outputs.WORKSPACE_ID }}
+        run: |
+          ITEMS=$(curl -s \
+            "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          echo "Workspace items:"
+          echo "$ITEMS" | jq '.value[] | {displayName, type, id}'
+
+          # Extract notebook IDs by name
+          NB1=$(echo "$ITEMS" | jq -r '.value[] | select(.displayName=="01_Generate_Invoices" and .type=="Notebook") | .id')
+          NB2=$(echo "$ITEMS" | jq -r '.value[] | select(.displayName=="02_AI_Extract_Invoices" and .type=="Notebook") | .id')
+          NB3=$(echo "$ITEMS" | jq -r '.value[] | select(.displayName=="03_Silver_Gold_Layers" and .type=="Notebook") | .id')
+
+          echo "NB1_ID=$NB1" >> "$GITHUB_OUTPUT"
+          echo "NB2_ID=$NB2" >> "$GITHUB_OUTPUT"
+          echo "NB3_ID=$NB3" >> "$GITHUB_OUTPUT"
+
+          echo "Notebook IDs: NB1=$NB1, NB2=$NB2, NB3=$NB3"
+
+      - name: Run Notebook - 01_Generate_Invoices
+        env:
+          FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
+          WORKSPACE_ID: ${{ steps.create-workspace.outputs.WORKSPACE_ID }}
+          NOTEBOOK_ID: ${{ steps.get-items.outputs.NB1_ID }}
+        run: |
+          echo "Running notebook: 01_Generate_Invoices ($NOTEBOOK_ID)"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?jobType=RunNotebook" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          echo "Started (HTTP $HTTP_CODE)"
+
+          # Poll for job completion
+          LOCATION=$(echo "$BODY" | jq -r '.location // empty')
+          for i in $(seq 1 60); do
+            sleep 30
+            JOB_STATUS=$(curl -s \
+              "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?limit=1" \
+              -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+              -H "Content-Type: application/json")
+
+            STATUS=$(echo "$JOB_STATUS" | jq -r '.value[0].status')
+            echo "Notebook job status: $STATUS"
+
+            if [ "$STATUS" = "Completed" ]; then
+              echo "Notebook 01 completed successfully"
+              break
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
+              echo "Notebook 01 failed: $JOB_STATUS"
+              exit 1
+            fi
+          done
+
+      - name: Run Notebook - 02_AI_Extract_Invoices
+        env:
+          FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
+          WORKSPACE_ID: ${{ steps.create-workspace.outputs.WORKSPACE_ID }}
+          NOTEBOOK_ID: ${{ steps.get-items.outputs.NB2_ID }}
+        run: |
+          echo "Running notebook: 02_AI_Extract_Invoices ($NOTEBOOK_ID)"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?jobType=RunNotebook" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          echo "Started (HTTP $HTTP_CODE)"
+
+          for i in $(seq 1 60); do
+            sleep 30
+            JOB_STATUS=$(curl -s \
+              "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?limit=1" \
+              -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+              -H "Content-Type: application/json")
+
+            STATUS=$(echo "$JOB_STATUS" | jq -r '.value[0].status')
+            echo "Notebook job status: $STATUS"
+
+            if [ "$STATUS" = "Completed" ]; then
+              echo "Notebook 02 completed successfully"
+              break
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
+              echo "Notebook 02 failed: $JOB_STATUS"
+              exit 1
+            fi
+          done
+
+      - name: Run Notebook - 03_Silver_Gold_Layers
+        env:
+          FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
+          WORKSPACE_ID: ${{ steps.create-workspace.outputs.WORKSPACE_ID }}
+          NOTEBOOK_ID: ${{ steps.get-items.outputs.NB3_ID }}
+        run: |
+          echo "Running notebook: 03_Silver_Gold_Layers ($NOTEBOOK_ID)"
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?jobType=RunNotebook" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          echo "Started (HTTP $HTTP_CODE)"
+
+          for i in $(seq 1 60); do
+            sleep 30
+            JOB_STATUS=$(curl -s \
+              "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NOTEBOOK_ID}/jobs/instances?limit=1" \
+              -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+              -H "Content-Type: application/json")
+
+            STATUS=$(echo "$JOB_STATUS" | jq -r '.value[0].status')
+            echo "Notebook job status: $STATUS"
+
+            if [ "$STATUS" = "Completed" ]; then
+              echo "Notebook 03 completed successfully"
+              break
+            elif [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ]; then
+              echo "Notebook 03 failed: $JOB_STATUS"
+              exit 1
+            fi
+          done
+
+      - name: Deployment Summary
+        env:
+          WORKSPACE_ID: ${{ steps.create-workspace.outputs.WORKSPACE_ID }}
+          WORKSPACE_NAME: ${{ steps.create-workspace.outputs.WORKSPACE_NAME }}
+        run: |
+          echo "## Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Workspace | ${WORKSPACE_NAME} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Workspace ID | ${WORKSPACE_ID} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ github.event.ref }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Notebooks Executed | 01_Generate_Invoices, 02_AI_Extract_Invoices, 03_Silver_Gold_Layers |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All notebooks ran successfully. Data has been populated in the feature lakehouse." >> $GITHUB_STEP_SUMMARY
