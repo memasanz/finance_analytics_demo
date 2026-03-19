@@ -339,8 +339,8 @@ jobs:
                   if status != "Succeeded":
                       print(f"WARNING: getDefinition failed for {nb_name}: {status}")
                       continue
-                  # Get result
-                  code2, body2, _ = api_request(f"{API}/workspaces/{WS_ID}/items/{nb_id}/getDefinition/result/{op_id}")
+                  # Get result from operations result endpoint (NOT item-scoped)
+                  code2, body2, _ = api_request(f"{API}/operations/{op_id}/result")
                   definition = json.loads(body2)
                   print("Got definition from result endpoint")
               else:
