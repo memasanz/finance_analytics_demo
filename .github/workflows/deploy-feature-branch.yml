@@ -257,21 +257,153 @@ jobs:
           echo "Workspace items:"
           echo "$ITEMS" | jq '.value[] | {displayName, type, id}'
 
-          # Extract notebook IDs by name
+          # Extract IDs
           NB1=$(echo "$ITEMS" | jq -r '.value[] | select(.displayName=="01_Generate_Invoices" and .type=="Notebook") | .id')
           NB2=$(echo "$ITEMS" | jq -r '.value[] | select(.displayName=="02_AI_Extract_Invoices" and .type=="Notebook") | .id')
           NB3=$(echo "$ITEMS" | jq -r '.value[] | select(.displayName=="03_Silver_Gold_Layers" and .type=="Notebook") | .id')
+          LAKEHOUSE_ID=$(echo "$ITEMS" | jq -r '.value[] | select(.displayName=="InvoiceLakehouse" and .type=="Lakehouse") | .id')
 
           echo "NB1_ID=$NB1" >> "$GITHUB_OUTPUT"
           echo "NB2_ID=$NB2" >> "$GITHUB_OUTPUT"
           echo "NB3_ID=$NB3" >> "$GITHUB_OUTPUT"
+          echo "LAKEHOUSE_ID=$LAKEHOUSE_ID" >> "$GITHUB_OUTPUT"
 
           echo "Notebook IDs: NB1=$NB1, NB2=$NB2, NB3=$NB3"
+          echo "Lakehouse ID: $LAKEHOUSE_ID"
 
           if [ -z "$NB1" ] || [ -z "$NB2" ] || [ -z "$NB3" ]; then
             echo "ERROR: One or more notebooks not found in workspace. Available items above."
             exit 1
           fi
+          if [ -z "$LAKEHOUSE_ID" ]; then
+            echo "ERROR: InvoiceLakehouse not found in workspace."
+            exit 1
+          fi
+
+      - name: Update Notebook Lakehouse Bindings
+        env:
+          FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
+          WORKSPACE_ID: ${{ steps.create-workspace.outputs.WORKSPACE_ID }}
+          LAKEHOUSE_ID: ${{ steps.get-items.outputs.LAKEHOUSE_ID }}
+        run: |
+          NOTEBOOKS=("${{ steps.get-items.outputs.NB1_ID }}" "${{ steps.get-items.outputs.NB2_ID }}" "${{ steps.get-items.outputs.NB3_ID }}")
+          NB_NAMES=("01_Generate_Invoices" "02_AI_Extract_Invoices" "03_Silver_Gold_Layers")
+
+          for idx in 0 1 2; do
+            NB_ID="${NOTEBOOKS[$idx]}"
+            NB_NAME="${NB_NAMES[$idx]}"
+            echo "Updating lakehouse binding for $NB_NAME ($NB_ID)..."
+
+            # Get the notebook definition (async operation)
+            HEADER_FILE=$(mktemp)
+            DEF_RESP=$(curl -s -w "\n%{http_code}" -D "$HEADER_FILE" -X POST \
+              "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/getDefinition" \
+              -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "")
+
+            HTTP_CODE=$(echo "$DEF_RESP" | tail -1)
+            echo "getDefinition response: HTTP $HTTP_CODE"
+
+            if [ "$HTTP_CODE" = "202" ]; then
+              # Long-running operation - get operation ID from headers
+              LOCATION=$(grep -i "^location:" "$HEADER_FILE" | sed 's/[Ll]ocation: *//g' | tr -d '\r')
+              OP_ID=$(grep -i "^x-ms-operation-id:" "$HEADER_FILE" | sed 's/[Xx]-[Mm][Ss]-[Oo]peration-[Ii][Dd]: *//g' | tr -d '\r')
+              RETRY=$(grep -i "^retry-after:" "$HEADER_FILE" | sed 's/[Rr]etry-[Aa]fter: *//g' | tr -d '\r')
+              rm -f "$HEADER_FILE"
+              echo "Operation ID: $OP_ID, Retry-After: $RETRY"
+
+              # Poll for completion
+              sleep "${RETRY:-10}"
+              for i in $(seq 1 15); do
+                RESULT=$(curl -s -w "\n%{http_code}" \
+                  "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/getDefinition" \
+                  -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  -X POST -d "")
+                R_CODE=$(echo "$RESULT" | tail -1)
+                R_BODY=$(echo "$RESULT" | sed '$d')
+                if [ "$R_CODE" = "200" ]; then
+                  DEF_BODY="$R_BODY"
+                  echo "Got definition successfully"
+                  break
+                fi
+                # Also try the operation result endpoint
+                if [ -n "$OP_ID" ]; then
+                  OP_RESULT=$(curl -s \
+                    "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/getDefinition/result/${OP_ID}" \
+                    -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+                    -H "Content-Type: application/json")
+                  HAS_PARTS=$(echo "$OP_RESULT" | jq -r '.definition.parts // empty' 2>/dev/null)
+                  if [ -n "$HAS_PARTS" ]; then
+                    DEF_BODY="$OP_RESULT"
+                    echo "Got definition from operation result"
+                    break
+                  fi
+                fi
+                echo "Waiting for definition... (attempt $i)"
+                sleep 10
+              done
+            else
+              rm -f "$HEADER_FILE"
+              DEF_BODY=$(echo "$DEF_RESP" | sed '$d')
+            fi
+
+            # Extract the notebook-content.py part (base64 encoded)
+            NB_CONTENT_B64=$(echo "$DEF_BODY" | jq -r '.definition.parts[] | select(.path=="notebook-content.py") | .payload')
+
+            if [ -z "$NB_CONTENT_B64" ] || [ "$NB_CONTENT_B64" = "null" ]; then
+              echo "WARNING: Could not get notebook content for $NB_NAME. Skipping lakehouse update."
+              echo "Definition body: $DEF_BODY"
+              continue
+            fi
+
+            # Decode, replace lakehouse IDs, re-encode
+            NB_CONTENT=$(echo "$NB_CONTENT_B64" | base64 -d)
+
+            # Replace the old lakehouse ID and workspace ID with the new ones
+            UPDATED_CONTENT=$(echo "$NB_CONTENT" | \
+              sed "s/\"default_lakehouse\": \"[^\"]*\"/\"default_lakehouse\": \"${LAKEHOUSE_ID}\"/g" | \
+              sed "s/\"default_lakehouse_workspace_id\": \"[^\"]*\"/\"default_lakehouse_workspace_id\": \"${WORKSPACE_ID}\"/g" | \
+              sed "s/\"id\": \"[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}\"/\"id\": \"${LAKEHOUSE_ID}\"/g")
+
+            UPDATED_B64=$(echo "$UPDATED_CONTENT" | base64 -w 0)
+
+            # Get the platform part
+            PLATFORM_B64=$(echo "$DEF_BODY" | jq -r '.definition.parts[] | select(.path==".platform") | .payload')
+
+            # Update the notebook definition
+            UPDATE_BODY=$(jq -n \
+              --arg nb_payload "$UPDATED_B64" \
+              --arg plat_payload "$PLATFORM_B64" \
+              '{
+                "definition": {
+                  "parts": [
+                    {"path": "notebook-content.py", "payload": $nb_payload, "payloadType": "InlineBase64"},
+                    {"path": ".platform", "payload": $plat_payload, "payloadType": "InlineBase64"}
+                  ]
+                }
+              }')
+
+            UPDATE_RESP=$(curl -s -w "\n%{http_code}" -X POST \
+              "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/updateDefinition" \
+              -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$UPDATE_BODY")
+
+            U_CODE=$(echo "$UPDATE_RESP" | tail -1)
+            U_BODY=$(echo "$UPDATE_RESP" | sed '$d')
+            echo "updateDefinition response: HTTP $U_CODE"
+
+            if [ "$U_CODE" -ge 200 ] && [ "$U_CODE" -lt 300 ] || [ "$U_CODE" = "202" ]; then
+              echo "Notebook $NB_NAME updated with new lakehouse ID"
+              sleep 5
+            else
+              echo "WARNING: Failed to update $NB_NAME (HTTP $U_CODE): $U_BODY"
+            fi
+          done
+
+          echo "Lakehouse binding update complete"
 
       - name: Run Notebook - 01_Generate_Invoices
         env:
