@@ -74,6 +74,16 @@ jobs:
             echo "Workspace created: $WORKSPACE_ID"
             echo "WORKSPACE_ID=$WORKSPACE_ID" >> "$GITHUB_OUTPUT"
             echo "WORKSPACE_NAME=$WORKSPACE_NAME" >> "$GITHUB_OUTPUT"
+          elif [ "$HTTP_CODE" = "409" ]; then
+            echo "Workspace already exists. Looking up ID..."
+            ALL_WS=$(curl -s \
+              "${FABRIC_API_BASE}/workspaces" \
+              -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+              -H "Content-Type: application/json")
+            WORKSPACE_ID=$(echo "$ALL_WS" | jq -r --arg name "$WORKSPACE_NAME" '.value[] | select(.displayName==$name) | .id')
+            echo "Found existing workspace: $WORKSPACE_ID"
+            echo "WORKSPACE_ID=$WORKSPACE_ID" >> "$GITHUB_OUTPUT"
+            echo "WORKSPACE_NAME=$WORKSPACE_NAME" >> "$GITHUB_OUTPUT"
           else
             echo "Failed to create workspace (HTTP $HTTP_CODE): $BODY"
             exit 1
