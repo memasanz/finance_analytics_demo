@@ -26,6 +26,7 @@ jobs:
       (github.event_name == 'workflow_dispatch') ||
       (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'feature_'))
     runs-on: ubuntu-latest
+    environment: fabric-deploy
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
