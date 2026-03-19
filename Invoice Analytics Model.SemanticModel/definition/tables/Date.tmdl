@@ -1,0 +1,63 @@
+table Date
+
+	column date_key
+		dataType: dateTime
+		isKey
+		formatString: yyyy-MM-dd
+		summarizeBy: none
+		sourceColumn: date_key
+
+	column year
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: year
+
+	column quarter
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: quarter
+
+	column month_number
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: month_number
+
+	column month_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: month_name
+		sortByColumn: month_number
+
+	column week_of_year
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: week_of_year
+
+	column day_of_month
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: day_of_month
+
+	column day_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: day_name
+
+	column quarter_label
+		dataType: string
+		summarizeBy: none
+		sourceColumn: quarter_label
+
+	column month_label
+		dataType: string
+		summarizeBy: none
+		sourceColumn: month_label
+		sortByColumn: month_number
+
+	partition Date = entity
+		mode: directLake
+		source
+			entityName: gold_dim_date
+			schemaName: dbo
+			expressionSource: DatabaseQuery
+

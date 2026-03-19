@@ -1,0 +1,90 @@
+{
+  "config": "{\"version\": \"5.53\", \"themeCollection\": {\"baseTheme\": {\"name\": \"CY24SU06\", \"version\": \"5.53\", \"type\": 2}}, \"activeSectionIndex\": 0, \"defaultDrillFilterOtherVisuals\": true, \"linguisticSchemaSyncVersion\": 2, \"settings\": {\"useStylableVisualContainerHeader\": true, \"exportDataMode\": 1, \"useDefaultAggregateDisplayName\": true}}",
+  "layoutOptimization": 0,
+  "resourcePackages": [],
+  "sections": [
+    {
+      "config": "{\"layouts\": [{\"id\": 0, \"position\": {\"x\": 0, \"y\": 0, \"z\": 0, \"width\": 1280, \"height\": 720, \"tabOrder\": 0}}]}",
+      "displayName": "Executive Summary",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 720.00,
+      "name": "ExecutiveSummary",
+      "visualContainers": [
+        {
+          "config": "{\"name\": \"chart_customer_invoices\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 660, \"y\": 210, \"z\": 6, \"width\": 600, \"height\": 240}}], \"singleVisual\": {\"visualType\": \"donutChart\", \"projections\": {\"Category\": [{\"queryRef\": \"Customers.customer_name\"}], \"Y\": [{\"queryRef\": \"Invoices.Invoice Count\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"c\", \"Entity\": \"Customers\", \"Type\": 0}, {\"Name\": \"i\", \"Entity\": \"Invoices\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"c\"}}, \"Property\": \"customer_name\"}, \"Name\": \"Customers.customer_name\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"Invoice Count\"}, \"Name\": \"Invoices.Invoice Count\"}]}}}",
+          "filters": "[]",
+          "height": 240.00,
+          "width": 600.00,
+          "x": 660.00,
+          "y": 210.00,
+          "z": 6.00
+        },
+        {
+          "config": "{\"name\": \"chart_vendor_spend\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 20, \"y\": 210, \"z\": 5, \"width\": 620, \"height\": 490}}], \"singleVisual\": {\"visualType\": \"barChart\", \"projections\": {\"Category\": [{\"queryRef\": \"Vendors.vendor_name\"}], \"Y\": [{\"queryRef\": \"Invoices.Total Spend\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"v\", \"Entity\": \"Vendors\", \"Type\": 0}, {\"Name\": \"i\", \"Entity\": \"Invoices\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"v\"}}, \"Property\": \"vendor_name\"}, \"Name\": \"Vendors.vendor_name\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"Total Spend\"}, \"Name\": \"Invoices.Total Spend\"}]}, \"objects\": {\"categoryAxis\": [{\"properties\": {\"labelDisplayUnits\": {\"expr\": {\"Literal\": {\"Value\": \"1000000L\"}}}}}], \"general\": [{\"properties\": {\"Title\": \"Spend by Vendor\"}}]}}}",
+          "filters": "[]",
+          "height": 490.00,
+          "width": 620.00,
+          "x": 20.00,
+          "y": 210.00,
+          "z": 5.00
+        },
+        {
+          "config": "{\"name\": \"kpi_avginvoice\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 620, \"y\": 70, \"z\": 3, \"width\": 280, \"height\": 130}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"Invoices.Avg Invoice Amount\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"i\", \"Entity\": \"Invoices\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"Avg Invoice Amount\"}, \"Name\": \"Invoices.Avg Invoice Amount\"}]}}}",
+          "filters": "[]",
+          "height": 130.00,
+          "width": 280.00,
+          "x": 620.00,
+          "y": 70.00,
+          "z": 3.00
+        },
+        {
+          "config": "{\"name\": \"kpi_invoicecount\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 320, \"y\": 70, \"z\": 2, \"width\": 280, \"height\": 130}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"Invoices.Invoice Count\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"i\", \"Entity\": \"Invoices\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"Invoice Count\"}, \"Name\": \"Invoices.Invoice Count\"}]}}}",
+          "filters": "[]",
+          "height": 130.00,
+          "width": 280.00,
+          "x": 320.00,
+          "y": 70.00,
+          "z": 2.00
+        },
+        {
+          "config": "{\"name\": \"kpi_issuerate\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 920, \"y\": 70, \"z\": 4, \"width\": 280, \"height\": 130}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"Invoices.Issue Rate\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"i\", \"Entity\": \"Invoices\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"Issue Rate\"}, \"Name\": \"Invoices.Issue Rate\"}]}}}",
+          "filters": "[]",
+          "height": 130.00,
+          "width": 280.00,
+          "x": 920.00,
+          "y": 70.00,
+          "z": 4.00
+        },
+        {
+          "config": "{\"name\": \"kpi_totalspend\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 20, \"y\": 70, \"z\": 1, \"width\": 280, \"height\": 130}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"Invoices.Total Spend\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"i\", \"Entity\": \"Invoices\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"Total Spend\"}, \"Name\": \"Invoices.Total Spend\"}]}}}",
+          "filters": "[]",
+          "height": 130.00,
+          "width": 280.00,
+          "x": 20.00,
+          "y": 70.00,
+          "z": 1.00
+        },
+        {
+          "config": "{\"name\": \"table_quality\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 660, \"y\": 460, \"z\": 7, \"width\": 600, \"height\": 240}}], \"singleVisual\": {\"visualType\": \"tableEx\", \"projections\": {\"Values\": [{\"queryRef\": \"Invoices.extraction_status\"}, {\"queryRef\": \"Invoices.Invoice Count\"}, {\"queryRef\": \"Invoices.Total Spend\"}, {\"queryRef\": \"Invoices.Avg Extraction Confidence\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"i\", \"Entity\": \"Invoices\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"extraction_status\"}, \"Name\": \"Invoices.extraction_status\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"Invoice Count\"}, \"Name\": \"Invoices.Invoice Count\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"Total Spend\"}, \"Name\": \"Invoices.Total Spend\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"i\"}}, \"Property\": \"Avg Extraction Confidence\"}, \"Name\": \"Invoices.Avg Extraction Confidence\"}]}}}",
+          "filters": "[]",
+          "height": 240.00,
+          "width": 600.00,
+          "x": 660.00,
+          "y": 460.00,
+          "z": 7.00
+        },
+        {
+          "config": "{\"name\": \"title1\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 20, \"y\": 10, \"z\": 0, \"width\": 600, \"height\": 50}}], \"singleVisual\": {\"visualType\": \"textbox\", \"objects\": {\"general\": [{\"properties\": {\"paragraphs\": [{\"textRuns\": [{\"value\": \"Invoice Analytics Dashboard\", \"textStyle\": {\"fontFamily\": \"Segoe UI Semibold\", \"fontSize\": \"20px\"}}]}]}}]}}}",
+          "filters": "[]",
+          "height": 50.00,
+          "width": 600.00,
+          "x": 20.00,
+          "y": 10.00,
+          "z": 0.00
+        }
+      ],
+      "width": 1280.00
+    }
+  ]
+}

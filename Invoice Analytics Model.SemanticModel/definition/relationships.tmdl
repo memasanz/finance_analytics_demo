@@ -1,0 +1,16 @@
+relationship Invoice_Vendor
+	fromColumn: Invoices.vendor_id
+	toColumn: Vendors.vendor_id
+
+relationship Invoice_Customer
+	fromColumn: Invoices.customer_id
+	toColumn: Customers.customer_id
+
+relationship Invoice_Date
+	fromColumn: Invoices.date_key
+	toColumn: Date.date_key
+
+relationship LineItem_Invoice
+	fromColumn: 'Line Items'.invoice_number
+	toColumn: Invoices.invoice_number
+

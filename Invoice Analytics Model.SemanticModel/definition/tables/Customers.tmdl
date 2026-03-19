@@ -1,0 +1,24 @@
+table Customers
+
+	column customer_id
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: customer_id
+
+	column customer_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: customer_name
+
+	column customer_address
+		dataType: string
+		summarizeBy: none
+		sourceColumn: customer_address
+
+	partition Customers = entity
+		mode: directLake
+		source
+			entityName: gold_dim_customer
+			schemaName: dbo
+			expressionSource: DatabaseQuery
+

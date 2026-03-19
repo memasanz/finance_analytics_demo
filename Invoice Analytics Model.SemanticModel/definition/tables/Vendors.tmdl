@@ -1,0 +1,24 @@
+table Vendors
+
+	column vendor_id
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: vendor_id
+
+	column vendor_name
+		dataType: string
+		summarizeBy: none
+		sourceColumn: vendor_name
+
+	column vendor_address
+		dataType: string
+		summarizeBy: none
+		sourceColumn: vendor_address
+
+	partition Vendors = entity
+		mode: directLake
+		source
+			entityName: gold_dim_vendor
+			schemaName: dbo
+			expressionSource: DatabaseQuery
+

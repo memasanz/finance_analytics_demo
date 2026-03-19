@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Notebook",
+    "displayName": "01_Generate_Invoices"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "1dde10eb-7ee4-b51f-446a-200d9d87fe01"
+  }
+}

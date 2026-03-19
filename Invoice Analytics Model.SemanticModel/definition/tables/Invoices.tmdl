@@ -1,0 +1,96 @@
+table Invoices
+
+	measure 'Total Spend' = SUM(Invoices[total_amount])
+		formatString: $#,##0.00
+
+	measure 'Invoice Count' = COUNTROWS(Invoices)
+
+	measure 'Avg Invoice Amount' = AVERAGE(Invoices[total_amount])
+		formatString: $#,##0.00
+
+	measure 'Invoices with Issues' = CALCULATE(COUNTROWS(Invoices), Invoices[data_quality_status] = "Has Issues")
+
+	measure 'Issue Rate' = DIVIDE([Invoices with Issues], [Invoice Count], 0)
+		formatString: 0.0%
+
+	measure 'Avg Extraction Confidence' = AVERAGE(Invoices[extraction_confidence])
+		formatString: 0.0%
+
+	measure 'Failed Extractions' = CALCULATE(COUNTROWS(Invoices), Invoices[extraction_status] = "FAILED")
+
+	measure 'Total Tax' = SUM(Invoices[tax_amount])
+		formatString: $#,##0.00
+
+	measure 'Spend MoM Change' =
+			VAR _CurrentMonth = CALCULATE([Total Spend], DATESMTD('Date'[date_key]))
+			VAR _PreviousMonth = CALCULATE([Total Spend], DATEADD('Date'[date_key], -1, MONTH))
+			RETURN IF(NOT ISBLANK(_PreviousMonth), DIVIDE(_CurrentMonth - _PreviousMonth, _PreviousMonth, BLANK()))
+		formatString: 0.0%
+
+	column invoice_number
+		dataType: string
+		summarizeBy: none
+		sourceColumn: invoice_number
+
+	column date_key
+		dataType: dateTime
+		formatString: yyyy-MM-dd
+		summarizeBy: none
+		sourceColumn: date_key
+
+	column vendor_id
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: vendor_id
+
+	column customer_id
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: customer_id
+
+	column subtotal
+		dataType: decimal
+		formatString: $#,##0.00
+		summarizeBy: sum
+		sourceColumn: subtotal
+
+	column tax_amount
+		dataType: decimal
+		formatString: $#,##0.00
+		summarizeBy: sum
+		sourceColumn: tax_amount
+
+	column total_amount
+		dataType: decimal
+		formatString: $#,##0.00
+		summarizeBy: sum
+		sourceColumn: total_amount
+
+	column currency
+		dataType: string
+		summarizeBy: none
+		sourceColumn: currency
+
+	column extraction_confidence
+		dataType: double
+		formatString: 0.00%
+		summarizeBy: average
+		sourceColumn: extraction_confidence
+
+	column extraction_status
+		dataType: string
+		summarizeBy: none
+		sourceColumn: extraction_status
+
+	column data_quality_status
+		dataType: string
+		summarizeBy: none
+		sourceColumn: data_quality_status
+
+	partition Invoices = entity
+		mode: directLake
+		source
+			entityName: gold_fact_invoices
+			schemaName: dbo
+			expressionSource: DatabaseQuery
+

@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "SemanticModel",
+    "displayName": "Invoice Analytics Model"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "039590e8-e431-9408-4f86-856c6ac75940"
+  }
+}

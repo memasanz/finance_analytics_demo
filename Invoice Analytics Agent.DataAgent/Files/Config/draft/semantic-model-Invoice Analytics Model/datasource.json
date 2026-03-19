@@ -1,0 +1,455 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/dataAgent/definition/dataSource/1.0.0/schema.json",
+  "artifactId": "039590e8-e431-9408-4f86-856c6ac75940",
+  "workspaceId": "00000000-0000-0000-0000-000000000000",
+  "dataSourceInstructions": null,
+  "displayName": "Invoice Analytics Model",
+  "type": "semantic_model",
+  "userDescription": null,
+  "metadata": {
+    "csdl_relationships": "[{\"FromTable\":\"Invoices\",\"FromColumn\":\"vendor_id\",\"ToTable\":\"Vendors\",\"ToColumn\":\"vendor_id\",\"IsActive\":true,\"IsBidirectional\":false,\"Cardinality\":\"ManyToOne\"},{\"FromTable\":\"Invoices\",\"FromColumn\":\"customer_id\",\"ToTable\":\"Customers\",\"ToColumn\":\"customer_id\",\"IsActive\":true,\"IsBidirectional\":false,\"Cardinality\":\"ManyToOne\"},{\"FromTable\":\"Invoices\",\"FromColumn\":\"date_key\",\"ToTable\":\"Date\",\"ToColumn\":\"date_key\",\"IsActive\":true,\"IsBidirectional\":false,\"Cardinality\":\"ManyToOne\"},{\"FromTable\":\"Line_Items\",\"FromColumn\":\"invoice_number\",\"ToTable\":\"Invoices\",\"ToColumn\":\"invoice_number\",\"IsActive\":true,\"IsBidirectional\":false,\"Cardinality\":\"ManyToOne\"}]"
+  },
+  "elements": [
+    {
+      "id": "Customers",
+      "is_selected": true,
+      "display_name": "Customers",
+      "type": "semantic_model.table",
+      "description": null,
+      "children": [
+        {
+          "id": "customer_address",
+          "is_selected": true,
+          "display_name": "customer_address",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "customer_id",
+          "is_selected": true,
+          "display_name": "customer_id",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "customer_name",
+          "is_selected": true,
+          "display_name": "customer_name",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "Date",
+      "is_selected": true,
+      "display_name": "Date",
+      "type": "semantic_model.table",
+      "description": null,
+      "children": [
+        {
+          "id": "date_key",
+          "is_selected": true,
+          "display_name": "date_key",
+          "type": "semantic_model.column",
+          "data_type": "DateTime",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "day_name",
+          "is_selected": true,
+          "display_name": "day_name",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "day_of_month",
+          "is_selected": true,
+          "display_name": "day_of_month",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "month_label",
+          "is_selected": true,
+          "display_name": "month_label",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "month_name",
+          "is_selected": true,
+          "display_name": "month_name",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "month_number",
+          "is_selected": true,
+          "display_name": "month_number",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "quarter",
+          "is_selected": true,
+          "display_name": "quarter",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "quarter_label",
+          "is_selected": true,
+          "display_name": "quarter_label",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "week_of_year",
+          "is_selected": true,
+          "display_name": "week_of_year",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "year",
+          "is_selected": true,
+          "display_name": "year",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "Invoices",
+      "is_selected": true,
+      "display_name": "Invoices",
+      "type": "semantic_model.table",
+      "description": null,
+      "children": [
+        {
+          "id": "Avg_Extraction_Confidence",
+          "is_selected": true,
+          "display_name": "Avg Extraction Confidence",
+          "type": "semantic_model.measure",
+          "data_type": "Double",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Avg_Invoice_Amount",
+          "is_selected": true,
+          "display_name": "Avg Invoice Amount",
+          "type": "semantic_model.measure",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "currency",
+          "is_selected": true,
+          "display_name": "currency",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "customer_id",
+          "is_selected": true,
+          "display_name": "customer_id",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "data_quality_status",
+          "is_selected": true,
+          "display_name": "data_quality_status",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "date_key",
+          "is_selected": true,
+          "display_name": "date_key",
+          "type": "semantic_model.column",
+          "data_type": "DateTime",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "extraction_confidence",
+          "is_selected": true,
+          "display_name": "extraction_confidence",
+          "type": "semantic_model.column",
+          "data_type": "Double",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "extraction_status",
+          "is_selected": true,
+          "display_name": "extraction_status",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Failed_Extractions",
+          "is_selected": true,
+          "display_name": "Failed Extractions",
+          "type": "semantic_model.measure",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Invoice_Count",
+          "is_selected": true,
+          "display_name": "Invoice Count",
+          "type": "semantic_model.measure",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "invoice_number",
+          "is_selected": true,
+          "display_name": "invoice_number",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Invoices_with_Issues",
+          "is_selected": true,
+          "display_name": "Invoices with Issues",
+          "type": "semantic_model.measure",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Issue_Rate",
+          "is_selected": true,
+          "display_name": "Issue Rate",
+          "type": "semantic_model.measure",
+          "data_type": "Double",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Spend_MoM_Change",
+          "is_selected": true,
+          "display_name": "Spend MoM Change",
+          "type": "semantic_model.measure",
+          "data_type": "Double",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "subtotal",
+          "is_selected": true,
+          "display_name": "subtotal",
+          "type": "semantic_model.column",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "tax_amount",
+          "is_selected": true,
+          "display_name": "tax_amount",
+          "type": "semantic_model.column",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Total_Spend",
+          "is_selected": true,
+          "display_name": "Total Spend",
+          "type": "semantic_model.measure",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Total_Tax",
+          "is_selected": true,
+          "display_name": "Total Tax",
+          "type": "semantic_model.measure",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "total_amount",
+          "is_selected": true,
+          "display_name": "total_amount",
+          "type": "semantic_model.column",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "vendor_id",
+          "is_selected": true,
+          "display_name": "vendor_id",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "Line_Items",
+      "is_selected": true,
+      "display_name": "Line Items",
+      "type": "semantic_model.table",
+      "description": null,
+      "children": [
+        {
+          "id": "description",
+          "is_selected": true,
+          "display_name": "description",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "invoice_number",
+          "is_selected": true,
+          "display_name": "invoice_number",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Line_Item_Count",
+          "is_selected": true,
+          "display_name": "Line Item Count",
+          "type": "semantic_model.measure",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "line_number",
+          "is_selected": true,
+          "display_name": "line_number",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "line_total",
+          "is_selected": true,
+          "display_name": "line_total",
+          "type": "semantic_model.column",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "quantity",
+          "is_selected": true,
+          "display_name": "quantity",
+          "type": "semantic_model.column",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "Total_Line_Item_Spend",
+          "is_selected": true,
+          "display_name": "Total Line Item Spend",
+          "type": "semantic_model.measure",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "unit_price",
+          "is_selected": true,
+          "display_name": "unit_price",
+          "type": "semantic_model.column",
+          "data_type": "Decimal",
+          "description": null,
+          "children": []
+        }
+      ]
+    },
+    {
+      "id": "Vendors",
+      "is_selected": true,
+      "display_name": "Vendors",
+      "type": "semantic_model.table",
+      "description": null,
+      "children": [
+        {
+          "id": "vendor_address",
+          "is_selected": true,
+          "display_name": "vendor_address",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "vendor_id",
+          "is_selected": true,
+          "display_name": "vendor_id",
+          "type": "semantic_model.column",
+          "data_type": "Int64",
+          "description": null,
+          "children": []
+        },
+        {
+          "id": "vendor_name",
+          "is_selected": true,
+          "display_name": "vendor_name",
+          "type": "semantic_model.column",
+          "data_type": "String",
+          "description": null,
+          "children": []
+        }
+      ]
+    }
+  ]
+}
