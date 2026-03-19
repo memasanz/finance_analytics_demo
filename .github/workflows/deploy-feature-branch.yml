@@ -4,6 +4,12 @@ on:
   create:
     branches:
       - 'feature_*'
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Feature branch name to deploy'
+        required: true
+        default: 'feature_branchout'
 
 permissions:
   id-token: write
@@ -16,7 +22,9 @@ env:
 
 jobs:
   deploy-and-populate:
-    if: github.event.ref_type == 'branch' && startsWith(github.event.ref, 'feature_')
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'feature_'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -41,7 +49,11 @@ jobs:
         env:
           FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
         run: |
-          BRANCH_NAME="${{ github.event.ref }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BRANCH_NAME="${{ github.event.inputs.branch_name }}"
+          else
+            BRANCH_NAME="${{ github.event.ref }}"
+          fi
           WORKSPACE_NAME="${BRANCH_NAME}"
 
           echo "Creating workspace: $WORKSPACE_NAME"
@@ -72,7 +84,11 @@ jobs:
           FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
           WORKSPACE_ID: ${{ steps.create-workspace.outputs.WORKSPACE_ID }}
         run: |
-          BRANCH_NAME="${{ github.event.ref }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BRANCH_NAME="${{ github.event.inputs.branch_name }}"
+          else
+            BRANCH_NAME="${{ github.event.ref }}"
+          fi
           OWNER_NAME="${{ github.repository_owner }}"
           REPO_NAME="${{ github.event.repository.name }}"
 
