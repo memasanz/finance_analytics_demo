@@ -343,25 +343,31 @@ jobs:
             fi
 
             # Step 4: Extract and modify notebook content
-            NB_CONTENT_B64=$(echo "$DEF_BODY" | jq -r '.definition.parts[] | select(.path=="notebook-content.py") | .payload' 2>/dev/null)
+            DEF_FILE=$(mktemp)
+            echo "$DEF_BODY" > "$DEF_FILE"
+            NB_CONTENT_B64=$(jq -r '.definition.parts[] | select(.path=="notebook-content.py") | .payload' "$DEF_FILE" 2>/dev/null)
 
             if [ -z "$NB_CONTENT_B64" ] || [ "$NB_CONTENT_B64" = "null" ]; then
               echo "WARNING: Could not get notebook content for $NB_NAME. Skipping."
+              rm -f "$DEF_FILE"
               continue
             fi
 
-            # Decode, replace lakehouse IDs, re-encode
-            NB_CONTENT=$(echo "$NB_CONTENT_B64" | base64 -d)
-            UPDATED_CONTENT=$(echo "$NB_CONTENT" | \
-              sed "s/\"default_lakehouse\": \"[^\"]*\"/\"default_lakehouse\": \"${LAKEHOUSE_ID}\"/g" | \
-              sed "s/\"default_lakehouse_workspace_id\": \"[^\"]*\"/\"default_lakehouse_workspace_id\": \"${WORKSPACE_ID}\"/g" | \
-              sed "s/\"id\": \"[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}\"/\"id\": \"${LAKEHOUSE_ID}\"/g")
-            UPDATED_B64=$(echo "$UPDATED_CONTENT" | base64 -w 0)
+            # Decode, replace lakehouse IDs, re-encode using temp files
+            CONTENT_FILE=$(mktemp)
+            echo "$NB_CONTENT_B64" | base64 -d > "$CONTENT_FILE"
+            sed -i "s/\"default_lakehouse\": \"[^\"]*\"/\"default_lakehouse\": \"${LAKEHOUSE_ID}\"/g" "$CONTENT_FILE"
+            sed -i "s/\"default_lakehouse_workspace_id\": \"[^\"]*\"/\"default_lakehouse_workspace_id\": \"${WORKSPACE_ID}\"/g" "$CONTENT_FILE"
+            sed -i "s/\"id\": \"[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}\"/\"id\": \"${LAKEHOUSE_ID}\"/g" "$CONTENT_FILE"
+            UPDATED_B64=$(base64 -w 0 < "$CONTENT_FILE")
+            rm -f "$CONTENT_FILE"
 
-            PLATFORM_B64=$(echo "$DEF_BODY" | jq -r '.definition.parts[] | select(.path==".platform") | .payload')
+            PLATFORM_B64=$(jq -r '.definition.parts[] | select(.path==".platform") | .payload' "$DEF_FILE")
+            rm -f "$DEF_FILE"
 
-            # Step 5: Update the notebook definition
-            UPDATE_BODY=$(jq -n \
+            # Step 5: Update the notebook definition using temp file for the body
+            UPDATE_FILE=$(mktemp)
+            jq -n \
               --arg nb_payload "$UPDATED_B64" \
               --arg plat_payload "$PLATFORM_B64" \
               '{
@@ -371,14 +377,15 @@ jobs:
                     {"path": ".platform", "payload": $plat_payload, "payloadType": "InlineBase64"}
                   ]
                 }
-              }')
+              }' > "$UPDATE_FILE"
 
             UPD_HEADER=$(mktemp)
             UPDATE_RESP=$(curl -s -w "\n%{http_code}" -D "$UPD_HEADER" -X POST \
               "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/updateDefinition" \
               -H "Authorization: Bearer ${FABRIC_TOKEN}" \
               -H "Content-Type: application/json" \
-              -d "$UPDATE_BODY")
+              -d @"$UPDATE_FILE")
+            rm -f "$UPDATE_FILE"
 
             U_CODE=$(echo "$UPDATE_RESP" | tail -1)
             U_BODY=$(echo "$UPDATE_RESP" | sed '$d')
