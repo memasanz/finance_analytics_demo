@@ -1,0 +1,92 @@
+name: Cleanup Feature Branch Workspace
+
+on:
+  delete:
+    branches:
+      - 'feature_*'
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Feature branch name whose workspace to delete'
+        required: true
+        default: 'feature_branchout'
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  FABRIC_API_BASE: https://api.fabric.microsoft.com/v1
+
+jobs:
+  cleanup-workspace:
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.ref_type == 'branch' && startsWith(github.event.ref, 'feature_'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get Fabric Access Token
+        id: get-token
+        run: |
+          TOKEN=$(az account get-access-token --resource "https://api.fabric.microsoft.com" --query accessToken -o tsv)
+          echo "::add-mask::$TOKEN"
+          echo "FABRIC_TOKEN=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Find and Delete Feature Workspace
+        env:
+          FABRIC_TOKEN: ${{ steps.get-token.outputs.FABRIC_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            BRANCH_NAME="${{ github.event.inputs.branch_name }}"
+          else
+            BRANCH_NAME="${{ github.event.ref }}"
+          fi
+          WORKSPACE_NAME="${BRANCH_NAME}"
+          echo "Looking for workspace: $WORKSPACE_NAME"
+
+          # Find workspace by name
+          ALL_WS=$(curl -s \
+            "${FABRIC_API_BASE}/workspaces" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          WORKSPACE_ID=$(echo "$ALL_WS" | jq -r --arg name "$WORKSPACE_NAME" '.value[] | select(.displayName==$name) | .id')
+
+          if [ -z "$WORKSPACE_ID" ]; then
+            echo "Workspace '$WORKSPACE_NAME' not found. Nothing to delete."
+            exit 0
+          fi
+
+          echo "Found workspace: $WORKSPACE_ID"
+
+          # Disconnect from Git first (ignore errors if not connected)
+          curl -s -X POST \
+            "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/git/disconnect" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{}' || true
+          echo "Git disconnected (or was not connected)"
+
+          # Delete the workspace
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE \
+            "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}" \
+            -H "Authorization: Bearer ${FABRIC_TOKEN}")
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            echo "Workspace '$WORKSPACE_NAME' ($WORKSPACE_ID) deleted successfully"
+          else
+            echo "Failed to delete workspace (HTTP $HTTP_CODE)"
+            exit 1
+          fi
+
+      - name: Cleanup Summary
+        run: |
+          echo "## Cleanup Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "Feature workspace has been deleted." >> "$GITHUB_STEP_SUMMARY"
