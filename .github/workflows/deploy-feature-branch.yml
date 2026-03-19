@@ -294,107 +294,113 @@ jobs:
             NB_NAME="${NB_NAMES[$idx]}"
             echo "=== Updating lakehouse binding for $NB_NAME ($NB_ID) ==="
 
-            # Step 1: Start getDefinition (returns 202 for async)
+            # All data flows through files to avoid shell variable size limits
+            DEF_FILE=$(mktemp)
             HEADER_FILE=$(mktemp)
-            DEF_RESP=$(curl -s -w "\n%{http_code}" -D "$HEADER_FILE" -X POST \
+
+            # Step 1: Start getDefinition (returns 202 for async)
+            HTTP_CODE=$(curl -s -o "$DEF_FILE" -w "%{http_code}" -D "$HEADER_FILE" -X POST \
               "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/getDefinition" \
               -H "Authorization: Bearer ${FABRIC_TOKEN}" \
               -H "Content-Type: application/json" \
               -d "")
-
-            HTTP_CODE=$(echo "$DEF_RESP" | tail -1)
-            BODY=$(echo "$DEF_RESP" | sed '$d')
             echo "getDefinition: HTTP $HTTP_CODE"
 
-            DEF_BODY=""
-            if [ "$HTTP_CODE" = "200" ]; then
-              DEF_BODY="$BODY"
-            elif [ "$HTTP_CODE" = "202" ]; then
+            if [ "$HTTP_CODE" = "202" ]; then
               OP_ID=$(grep -i "^x-ms-operation-id:" "$HEADER_FILE" | sed 's/[Xx]-[Mm][Ss]-[Oo]peration-[Ii][Dd]: *//g' | tr -d '\r')
               echo "Async operation: $OP_ID"
               rm -f "$HEADER_FILE"
 
-              # Step 2: Poll operation status via GET /operations/{opId}
+              # Step 2: Poll operation status
+              OP_STATUS="Running"
               for i in $(seq 1 20); do
                 sleep 10
-                OP_STATE=$(curl -s \
-                  "${FABRIC_API_BASE}/operations/${OP_ID}" \
-                  -H "Authorization: Bearer ${FABRIC_TOKEN}")
+                OP_STATE=$(curl -s "${FABRIC_API_BASE}/operations/${OP_ID}" -H "Authorization: Bearer ${FABRIC_TOKEN}")
                 OP_STATUS=$(echo "$OP_STATE" | jq -r '.status')
                 echo "  Operation status: $OP_STATUS (attempt $i)"
-                if [ "$OP_STATUS" = "Succeeded" ]; then
-                  break
-                elif [ "$OP_STATUS" = "Failed" ]; then
-                  echo "  Operation failed: $OP_STATE"
-                  break
-                fi
+                if [ "$OP_STATUS" = "Succeeded" ] || [ "$OP_STATUS" = "Failed" ]; then break; fi
               done
 
-              # Step 3: Get the result via the result endpoint
+              # Step 3: Get result directly into file
               if [ "$OP_STATUS" = "Succeeded" ]; then
-                DEF_BODY=$(curl -s \
+                curl -s -o "$DEF_FILE" \
                   "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/getDefinition/result/${OP_ID}" \
-                  -H "Authorization: Bearer ${FABRIC_TOKEN}")
+                  -H "Authorization: Bearer ${FABRIC_TOKEN}"
                 echo "Got definition from result endpoint"
+              else
+                echo "WARNING: getDefinition failed for $NB_NAME. Skipping."
+                rm -f "$DEF_FILE" "$HEADER_FILE" 2>/dev/null
+                continue
               fi
-            else
-              rm -f "$HEADER_FILE"
-              echo "Unexpected status: HTTP $HTTP_CODE - $BODY"
+            elif [ "$HTTP_CODE" != "200" ]; then
+              echo "Unexpected status: HTTP $HTTP_CODE"
+              cat "$DEF_FILE"
+              rm -f "$DEF_FILE" "$HEADER_FILE" 2>/dev/null
+              continue
             fi
+            rm -f "$HEADER_FILE" 2>/dev/null
 
-            # Step 4: Extract and modify notebook content
-            DEF_FILE=$(mktemp)
-            echo "$DEF_BODY" > "$DEF_FILE"
-            NB_CONTENT_B64=$(jq -r '.definition.parts[] | select(.path=="notebook-content.py") | .payload' "$DEF_FILE" 2>/dev/null)
+            # Step 4: Extract notebook content payload from definition file to a raw file, decode, modify
+            CONTENT_B64_FILE=$(mktemp)
+            CONTENT_FILE=$(mktemp)
+            jq -r '.definition.parts[] | select(.path=="notebook-content.py") | .payload' "$DEF_FILE" > "$CONTENT_B64_FILE" 2>/dev/null
 
-            if [ -z "$NB_CONTENT_B64" ] || [ "$NB_CONTENT_B64" = "null" ]; then
+            if [ ! -s "$CONTENT_B64_FILE" ] || [ "$(cat "$CONTENT_B64_FILE")" = "null" ]; then
               echo "WARNING: Could not get notebook content for $NB_NAME. Skipping."
-              rm -f "$DEF_FILE"
+              rm -f "$DEF_FILE" "$CONTENT_B64_FILE" "$CONTENT_FILE" 2>/dev/null
               continue
             fi
 
-            # Decode, replace lakehouse IDs, re-encode using temp files
-            CONTENT_FILE=$(mktemp)
-            echo "$NB_CONTENT_B64" | base64 -d > "$CONTENT_FILE"
+            # Decode base64 to file
+            base64 -d < "$CONTENT_B64_FILE" > "$CONTENT_FILE"
+            rm -f "$CONTENT_B64_FILE"
+
+            # Replace lakehouse IDs in-place in the file
             sed -i "s/\"default_lakehouse\": \"[^\"]*\"/\"default_lakehouse\": \"${LAKEHOUSE_ID}\"/g" "$CONTENT_FILE"
             sed -i "s/\"default_lakehouse_workspace_id\": \"[^\"]*\"/\"default_lakehouse_workspace_id\": \"${WORKSPACE_ID}\"/g" "$CONTENT_FILE"
             sed -i "s/\"id\": \"[0-9a-f]\{8\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{4\}-[0-9a-f]\{12\}\"/\"id\": \"${LAKEHOUSE_ID}\"/g" "$CONTENT_FILE"
-            UPDATED_B64=$(base64 -w 0 < "$CONTENT_FILE")
+
+            # Re-encode to base64 file
+            UPDATED_B64_FILE=$(mktemp)
+            base64 -w 0 < "$CONTENT_FILE" > "$UPDATED_B64_FILE"
             rm -f "$CONTENT_FILE"
 
-            PLATFORM_B64=$(jq -r '.definition.parts[] | select(.path==".platform") | .payload' "$DEF_FILE")
+            # Extract platform payload to file
+            PLATFORM_B64_FILE=$(mktemp)
+            jq -r '.definition.parts[] | select(.path==".platform") | .payload' "$DEF_FILE" > "$PLATFORM_B64_FILE"
             rm -f "$DEF_FILE"
 
-            # Step 5: Update the notebook definition using temp file for the body
+            # Step 5: Build update body using jq with --rawfile (reads file contents as string)
             UPDATE_FILE=$(mktemp)
             jq -n \
-              --arg nb_payload "$UPDATED_B64" \
-              --arg plat_payload "$PLATFORM_B64" \
+              --rawfile nb_payload "$UPDATED_B64_FILE" \
+              --rawfile plat_payload "$PLATFORM_B64_FILE" \
               '{
                 "definition": {
                   "parts": [
-                    {"path": "notebook-content.py", "payload": $nb_payload, "payloadType": "InlineBase64"},
-                    {"path": ".platform", "payload": $plat_payload, "payloadType": "InlineBase64"}
+                    {"path": "notebook-content.py", "payload": ($nb_payload | rtrimstr("\n")), "payloadType": "InlineBase64"},
+                    {"path": ".platform", "payload": ($plat_payload | rtrimstr("\n")), "payloadType": "InlineBase64"}
                   ]
                 }
               }' > "$UPDATE_FILE"
+            rm -f "$UPDATED_B64_FILE" "$PLATFORM_B64_FILE"
 
+            echo "Update body size: $(wc -c < "$UPDATE_FILE") bytes"
+
+            # Step 6: Send update
             UPD_HEADER=$(mktemp)
-            UPDATE_RESP=$(curl -s -w "\n%{http_code}" -D "$UPD_HEADER" -X POST \
+            UPD_RESP_FILE=$(mktemp)
+            HTTP_CODE=$(curl -s -o "$UPD_RESP_FILE" -w "%{http_code}" -D "$UPD_HEADER" -X POST \
               "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/items/${NB_ID}/updateDefinition" \
               -H "Authorization: Bearer ${FABRIC_TOKEN}" \
               -H "Content-Type: application/json" \
               -d @"$UPDATE_FILE")
             rm -f "$UPDATE_FILE"
+            echo "updateDefinition: HTTP $HTTP_CODE"
 
-            U_CODE=$(echo "$UPDATE_RESP" | tail -1)
-            U_BODY=$(echo "$UPDATE_RESP" | sed '$d')
-            echo "updateDefinition: HTTP $U_CODE"
-
-            if [ "$U_CODE" = "200" ]; then
+            if [ "$HTTP_CODE" = "200" ]; then
               echo "Notebook $NB_NAME updated successfully"
-            elif [ "$U_CODE" = "202" ]; then
-              # Wait for async update to complete
+            elif [ "$HTTP_CODE" = "202" ]; then
               UPD_OP_ID=$(grep -i "^x-ms-operation-id:" "$UPD_HEADER" | sed 's/[Xx]-[Mm][Ss]-[Oo]peration-[Ii][Dd]: *//g' | tr -d '\r')
               echo "Update async operation: $UPD_OP_ID"
               for j in $(seq 1 15); do
@@ -406,12 +412,11 @@ jobs:
               done
               echo "Notebook $NB_NAME update completed: $UPD_STATUS"
             else
-              echo "WARNING: Failed to update $NB_NAME (HTTP $U_CODE): $U_BODY"
+              echo "WARNING: Failed to update $NB_NAME (HTTP $HTTP_CODE):"
+              cat "$UPD_RESP_FILE"
             fi
-            rm -f "$UPD_HEADER" 2>/dev/null
+            rm -f "$UPD_HEADER" "$UPD_RESP_FILE" 2>/dev/null
           done
-
-          echo "Lakehouse binding update complete"
 
           echo "Lakehouse binding update complete"
 
