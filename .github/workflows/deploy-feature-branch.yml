@@ -156,13 +156,20 @@ jobs:
 
           if [ "$REQUIRED_ACTION" = "UpdateFromGit" ]; then
             echo "Updating workspace from Git..."
-            # Use -D to capture response headers for the operation ID
-            HEADER_FILE=$(mktemp)
-            UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -D "$HEADER_FILE" -X POST \
-              "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/git/updateFromGit" \
-              -H "Authorization: Bearer ${FABRIC_TOKEN}" \
-              -H "Content-Type: application/json" \
-              -d "{
+            # Build request body - omit workspaceHead if null (new workspace)
+            if [ "$WORKSPACE_HEAD" = "null" ] || [ -z "$WORKSPACE_HEAD" ]; then
+              UPDATE_BODY="{
+                \"remoteCommitHash\": \"${REMOTE_COMMIT}\",
+                \"conflictResolution\": {
+                  \"conflictResolutionType\": \"Workspace\",
+                  \"conflictResolutionPolicy\": \"PreferRemote\"
+                },
+                \"options\": {
+                  \"allowOverrideItems\": true
+                }
+              }"
+            else
+              UPDATE_BODY="{
                 \"remoteCommitHash\": \"${REMOTE_COMMIT}\",
                 \"workspaceHead\": \"${WORKSPACE_HEAD}\",
                 \"conflictResolution\": {
@@ -172,7 +179,15 @@ jobs:
                 \"options\": {
                   \"allowOverrideItems\": true
                 }
-              }")
+              }"
+            fi
+            # Use -D to capture response headers for the operation ID
+            HEADER_FILE=$(mktemp)
+            UPDATE_RESPONSE=$(curl -s -w "\n%{http_code}" -D "$HEADER_FILE" -X POST \
+              "${FABRIC_API_BASE}/workspaces/${WORKSPACE_ID}/git/updateFromGit" \
+              -H "Authorization: Bearer ${FABRIC_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "$UPDATE_BODY")
 
             HTTP_CODE=$(echo "$UPDATE_RESPONSE" | tail -1)
             BODY=$(echo "$UPDATE_RESPONSE" | sed '$d')
